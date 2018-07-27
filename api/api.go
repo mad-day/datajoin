@@ -19,6 +19,7 @@ package api
 
 import "io"
 import "reflect"
+import "fmt"
 
 type Row []interface{}
 type RowIter interface{
@@ -53,5 +54,32 @@ type SpecSingle struct{
 type DataSourceImpl map[string]RowSource
 func (dsi DataSourceImpl) GetSource(name string) RowSource { return dsi[name] }
 
-
-
+type MockTable struct{
+	ItsNames []string
+	ItsTypes []reflect.Type
+}
+func NewMockTable(vrs ...interface{}) (m *MockTable) {
+	m = new(MockTable)
+	if (len(vrs)&1)==1 {
+		vrs = vrs[:len(vrs)-1]
+	}
+	for i,v := range vrs {
+		if (i&1)==0 {
+			m.ItsNames = append(m.ItsNames,fmt.Sprint(v))
+		}else{
+			m.ItsTypes = append(m.ItsTypes,reflect.ValueOf(v).Elem().Type())
+		}
+	}
+	return
+}
+func (m *MockTable) Names() []string {
+	s := make([]string,len(m.ItsNames))
+	copy(s,m.ItsNames)
+	return s
+}
+func (m *MockTable) Types() []reflect.Type {
+	s := make([]reflect.Type,len(m.ItsTypes))
+	copy(s,m.ItsTypes)
+	return s
+}
+func (m *MockTable) Lookup(i ... interface{}) (RowIter,error) { return nil,fmt.Errorf("not implemented") }

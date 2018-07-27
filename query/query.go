@@ -40,6 +40,17 @@ func runOnEachSubquery(f sql.TransformNodeFunc) (r sql.TransformNodeFunc) {
 	}
 	return
 }
+func runOnEachSubqueryExpr(e sql.TransformExprFunc) sql.TransformNodeFunc {
+	return func(node sql.Node) (sql.Node, error) {
+		switch v := node.(type) {
+		case *plan.SubqueryAlias:
+			up,err := v.Child.TransformExpressionsUp(e)
+			if err!=nil { return nil,err }
+			return plan.NewSubqueryAlias(v.Name(),up),nil
+		}
+		return node,nil
+	}
+}
 func indent(i int) sql.TransformExprFunc {
 	return func(expr sql.Expression) (sql.Expression, error) {
 		if gf,ok := expr.(*expression.GetField); ok {
@@ -72,6 +83,7 @@ func joinJoins (node sql.Node) (sql.Node, error) {
 	}
 	
 	mj := new(MultiJoin)
+	mj.Cookie = new(Cookie)
 	mj.Filters = expr
 	
 	if lmj,ok := left.(*MultiJoin); ok {
@@ -94,6 +106,50 @@ func joinJoins (node sql.Node) (sql.Node, error) {
 	}
 	
 	return mj,nil
+}
+
+func pullOffFilters (node sql.Node) (sql.Node, error) {
+	switch v := node.(type) {
+	case *MultiJoin:
+		if len(v.Filters)==0 { break }
+		cond := expression.JoinAnd(v.Filters...)
+		return plan.NewFilter(cond,&MultiJoin{Cookie:v.Cookie,Tables:v.Tables}),nil
+	case *plan.Filter:
+		v2,ok := v.Child.(*plan.Filter)
+		if !ok { break }
+		return plan.NewFilter(expression.NewAnd(v.Expression,v2.Expression),v2.Child),nil
+	}
+	return node,nil
+}
+func traverseAnd(expr sql.Expression) (exprs []sql.Expression) {
+	var tf func(expr sql.Expression)
+	tf = func(expr sql.Expression) {
+		switch v := expr.(type) {
+		case *expression.And:
+			tf(v.Left)
+			tf(v.Right)
+		default:
+			exprs = append(exprs,expr)
+		}
+	}
+	tf(expr)
+	return
+}
+func pushDownFilters (node sql.Node) (sql.Node, error) {
+	switch v := node.(type) {
+	case *plan.Filter:
+		mj,ok := v.Child.(*MultiJoin)
+		if !ok { break }
+		return plan.NewFilter(
+			v.Expression,
+			&MultiJoin{
+				Cookie:mj.Cookie,
+				Tables:mj.Tables,
+				Filters:traverseAnd(v.Expression),
+			},
+		),nil
+	}
+	return node,nil
 }
 
 type mdbObj struct{
@@ -130,6 +186,11 @@ func (dc DataContext) Parse(query string) (sql.Node,error) {
 	an := analyzer.NewDefault(sql.NewCatalog())
 	an.Catalog.AddDatabase(db)
 	an.CurrentDatabase = "public"
+	an.Catalog.RegisterFunction("equal",sql.FunctionN(NewEqual))
+	an.Catalog.RegisterFunction("each",sql.FunctionN(NewEach))
+	an.Catalog.RegisterFunction("anyof",sql.FunctionN(NewAny))
+	an.Catalog.RegisterFunction("lowest",sql.FunctionN(NewLowest))
+	an.Catalog.RegisterFunction("highest",sql.FunctionN(NewHighest))
 	
 	ec := sql.NewEmptyContext()
 	tree,err := parse.Parse(ec,query)
@@ -143,10 +204,22 @@ func (dc DataContext) Parse(query string) (sql.Node,error) {
 	tree,err = an.Analyze(ec,tree)
 	if err!=nil { return nil,err }
 	
+	tree,err = tree.TransformExpressionsUp(convertSpecialOne)
+	if err!=nil { return nil,err }
+	
+	tree,err = tree.TransformUp(runOnEachSubqueryExpr(convertSpecialOne))
+	if err!=nil { return nil,err }
+	
 	tree,err = tree.TransformUp(runOnEachSubquery(unAlias))
 	if err!=nil { return nil,err }
 	
 	tree,err = tree.TransformUp(runOnEachSubquery(joinJoins))
+	if err!=nil { return nil,err }
+	
+	tree,err = tree.TransformUp(runOnEachSubquery(pullOffFilters))
+	if err!=nil { return nil,err }
+	
+	tree,err = tree.TransformUp(runOnEachSubquery(pushDownFilters))
 	if err!=nil { return nil,err }
 	
 	return tree,nil
@@ -201,8 +274,9 @@ func (t *AdHocTable) RowIter(*sql.Context) (sql.RowIter, error) { return nil,fmt
 func (t *AdHocTable) TransformUp(f sql.TransformNodeFunc) (sql.Node, error) { return f(t)}
 func (t *AdHocTable) TransformExpressionsUp(sql.TransformExprFunc) (sql.Node, error) { return t,nil }
 
-
+type Cookie struct{}
 type MultiJoin struct {
+	*Cookie
 	Tables  []sql.Node
 	Filters []sql.Expression
 }
