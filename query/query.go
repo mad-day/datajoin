@@ -18,6 +18,7 @@
 package query
 
 import "gopkg.in/src-d/go-mysql-server.v0/sql/expression"
+import "gopkg.in/src-d/go-mysql-server.v0/sql/expression/function"
 import "gopkg.in/src-d/go-mysql-server.v0/sql"
 import "gopkg.in/src-d/go-mysql-server.v0/sql/parse"
 import "gopkg.in/src-d/go-mysql-server.v0/sql/analyzer"
@@ -175,6 +176,26 @@ func (m *mdbObj) replaceAll(node sql.Node) (sql.Node, error) {
 	return node,nil
 }
 
+var ebad_mj = fmt.Errorf("improper MultiJoin")
+var efound_mj = fmt.Errorf("found MultiJoin")
+func findMultiJoin(expr sql.Node) (sql.Node, error) {
+	switch v := expr.(type) {
+	case *MultiJoin:
+		for _,c := range v.Tables {
+			if _,ok := c.(*AdHocTable) ; !ok { return nil,ebad_mj }
+		}
+		return nil,efound_mj
+	}
+	return expr,nil
+}
+func emplaceMultiJoin(expr sql.Node) (sql.Node, error) {
+	switch expr.(type) {
+	case *AdHocTable:
+		return &MultiJoin{Cookie:new(Cookie),Tables:[]sql.Node{expr}},nil
+	}
+	return expr,nil
+}
+
 type DataContext struct{
 	DS api.DataSource
 }
@@ -186,6 +207,9 @@ func (dc DataContext) Parse(query string) (sql.Node,error) {
 	an := analyzer.NewDefault(sql.NewCatalog())
 	an.Catalog.AddDatabase(db)
 	an.CurrentDatabase = "public"
+	for k,v := range function.Defaults {
+		an.Catalog.RegisterFunction(k,v)
+	}
 	an.Catalog.RegisterFunction("equal",sql.FunctionN(NewEqual))
 	an.Catalog.RegisterFunction("each",sql.FunctionN(NewEach))
 	an.Catalog.RegisterFunction("anyof",sql.FunctionN(NewAny))
@@ -198,8 +222,6 @@ func (dc DataContext) Parse(query string) (sql.Node,error) {
 	
 	tree,err = tree.TransformUp(runOnEachSubquery(mdb.replaceAll))
 	if err!=nil { return nil,err }
-	
-	fmt.Println(tree)
 	
 	tree,err = an.Analyze(ec,tree)
 	if err!=nil { return nil,err }
@@ -219,7 +241,19 @@ func (dc DataContext) Parse(query string) (sql.Node,error) {
 	tree,err = tree.TransformUp(runOnEachSubquery(pullOffFilters))
 	if err!=nil { return nil,err }
 	
+	_,err = tree.TransformUp(runOnEachSubquery(findMultiJoin))
+	if err==nil {
+		tree,err = tree.TransformUp(runOnEachSubquery(emplaceMultiJoin))
+	} else if err==efound_mj {
+	} else { return nil,err }
+	
 	tree,err = tree.TransformUp(runOnEachSubquery(pushDownFilters))
+	if err!=nil { return nil,err }
+	
+	tree,err = tree.TransformExpressionsUp(validateSpecial)
+	if err!=nil { return nil,err }
+	
+	tree,err = tree.TransformUp(runOnEachSubqueryExpr(validateSpecial))
 	if err!=nil { return nil,err }
 	
 	return tree,nil

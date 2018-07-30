@@ -249,5 +249,8 @@ func convertSpecialOne(expr sql.Expression) (sql.Expression, error) {
 	}
 	return expr,nil
 }
-
+func validateSpecial(expr sql.Expression) (sql.Expression,error) {
+	if _,ok := expr.(invalidExpression); ok { return nil,fmt.Errorf("improper use of %v",expr) }
+	return expr,nil
+}
 
