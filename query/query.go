@@ -69,44 +69,48 @@ func unAlias (node sql.Node) (sql.Node, error) {
 	return node,nil
 }
 
-func joinJoins (node sql.Node) (sql.Node, error) {
-	var left,right sql.Node
-	var expr []sql.Expression
+func simplifyJoins (node sql.Node) (sql.Node, error) {
 	switch v := node.(type) {
-	case *plan.CrossJoin:
-		left = v.Left
-		right = v.Right
-	case *plan.InnerJoin:
-		left = v.Left
-		right = v.Right
-		expr = []sql.Expression{v.Cond}
-	default:return node,nil
+	case *plan.InnerJoin: return plan.NewFilter(v.Cond,plan.NewCrossJoin(v.Left,v.Right)),nil
 	}
-	
-	mj := new(MultiJoin)
-	mj.Cookie = new(Cookie)
-	mj.Filters = expr
-	
-	if lmj,ok := left.(*MultiJoin); ok {
+	return node,nil
+}
+
+func unifyJoins (node sql.Node) (sql.Node, error) {
+	switch v := node.(type) {
+	case *AdHocTable:
+		mj := new(MultiJoin)
+		mj.Cookie = new(Cookie)
+		mj.Tables = []sql.Node{node}
+		return mj,nil
+	case *plan.Filter:
+		omj,ok := v.Child.(*MultiJoin)
+		if !ok { return node,nil }
+		mj := new(MultiJoin)
+		mj.Cookie = omj.Cookie
+		mj.Tables = omj.Tables
+		mj.Filters = append(omj.Filters,v.Expression)
+		return mj,nil
+	case *plan.CrossJoin:
+		lmj,lok := v.Left.(*MultiJoin)
+		rmj,rok := v.Right.(*MultiJoin)
+		if !(lok&&rok) { return node,nil }
+		mj := new(MultiJoin)
+		mj.Cookie = new(Cookie)
 		mj.Tables = append(mj.Tables,lmj.Tables...)
 		mj.Filters = append(mj.Filters,lmj.Filters...)
-	} else {
-		mj.Tables = append(mj.Tables,left)
-	}
-	
-	if lmj,ok := right.(*MultiJoin); ok {
-		sl := len(left.Schema())
+		sl := len(lmj.Schema())
 		tf := indent(sl)
-		mj.Tables = append(mj.Tables,lmj.Tables...)
-		for _,f := range lmj.Filters {
+		mj.Tables = append(mj.Tables,rmj.Tables...)
+		for _,f := range rmj.Filters {
 			nf,_ := f.TransformUp(tf)
 			mj.Filters = append(mj.Filters,nf)
 		}
-	} else {
-		mj.Tables = append(mj.Tables,right)
+		return mj,nil
+	default: return node,nil
 	}
 	
-	return mj,nil
+	return node,nil
 }
 
 func pullOffFilters (node sql.Node) (sql.Node, error) {
@@ -235,7 +239,10 @@ func (dc DataContext) Parse(query string) (sql.Node,error) {
 	tree,err = tree.TransformUp(runOnEachSubquery(unAlias))
 	if err!=nil { return nil,err }
 	
-	tree,err = tree.TransformUp(runOnEachSubquery(joinJoins))
+	tree,err = tree.TransformUp(runOnEachSubquery(simplifyJoins))
+	if err!=nil { return nil,err }
+	
+	tree,err = tree.TransformUp(runOnEachSubquery(unifyJoins))
 	if err!=nil { return nil,err }
 	
 	tree,err = tree.TransformUp(runOnEachSubquery(pullOffFilters))
