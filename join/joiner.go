@@ -17,10 +17,20 @@
 
 package join
 
-
+import "github.com/mad-day/datajoin/join/hashjoin"
 import "gopkg.in/src-d/go-mysql-server.v0/sql"
 import "io"
-import "fmt"
+import "context"
+
+
+func (r *RealJoin) getPreferedX(x int) int {
+	if r.Chunk==0 { return x }
+	return r.Chunk
+}
+func (r *RealJoin) getPreferedBufferSize() int { return r.getPreferedX(128) }
+func (r *RealJoin) getPreferedChunkSize_One() int { return r.getPreferedX(1024) }
+func (r *RealJoin) getPreferedChunkSize_Two() int { return r.getPreferedX(128) }
+
 
 func (r *RealJoin) Resolved() bool { return true }
 func (r *RealJoin) TransformUp(f sql.TransformNodeFunc) (sql.Node, error) { return f(r) }
@@ -32,8 +42,21 @@ func (r *RealJoin) Schema() (s sql.Schema) {
 	return s
 }
 func (r *RealJoin) Children() []sql.Node { return nil }
-func (r *RealJoin) RowIter(*sql.Context) (sql.RowIter, error) {
-	return nil,fmt.Errorf("not implemented!")
+func (r *RealJoin) RowIter(ctx *sql.Context) (sql.RowIter, error) {
+	var cancel func()
+	nctx := new(sql.Context)
+	*nctx = *ctx
+	nctx.Context,cancel = context.WithCancel(nctx.Context)
+	ri := &rowIter{nctx,make(chan sql.Row,r.getPreferedBufferSize()),cancel}
+	
+	pi := &hashjoin.PassingIterator{Ctx:nctx,Endpt:ri,Hashes:r.MergeHashes(),Chunk:r.getPreferedChunkSize_One()}
+	go func() {
+		defer close(ri.buffer)
+		r.IterateOver(nctx,pi,r.getPreferedChunkSize_Two())
+	}()
+	
+	return ri,nil
+	//return nil,fmt.Errorf("not implemented!")
 }
 var _ sql.Node = (*RealJoin)(nil)
 

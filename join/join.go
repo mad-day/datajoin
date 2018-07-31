@@ -58,6 +58,7 @@ type RealJoin struct{
 	Prefilter []sql.Expression /* Per-Table input filters. */
 	Indexer   []matcher.FieldSpecs /* Index-Scan hints. */
 	Indexer2  []*SpecBuilder /* Preprocessed version of .Indexer */
+	Chunk     int
 }
 func (r *RealJoin) String() string {
 	tp := sql.NewTreePrinter()

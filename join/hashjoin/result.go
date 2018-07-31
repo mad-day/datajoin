@@ -22,7 +22,6 @@ import "github.com/mad-day/datajoin/join/apis"
 import "golang.org/x/crypto/blake2b"
 import farm "github.com/dgryski/go-farm"
 import "hash"
-import "fmt"
 
 type MergeTableHash struct{
 	Left, Right []sql.Expression
@@ -66,7 +65,6 @@ func (pi *PassingIterator) PassTabBlockRow(tabs [][]sql.Row) error {
 		err := pi.Tables[i].SetRows(block,func(row sql.Row) (h1,h2 uint64,e error) {
 			pi.buf,e = Hash(pi.buf,pi.Ctx,row,pi.fu,pi.Hashes[i].Right...)
 			h1,h2 = farm.Hash128(pi.buf)
-			fmt.Println(i,row,h1,h2)
 			return
 		})
 		if err!=nil { return err }
@@ -90,7 +88,6 @@ func (pi *PassingIterator) PassTabBlockRow(tabs [][]sql.Row) error {
 	return nil
 }
 func (pi *PassingIterator) perform(i int,row sql.Row) (e error) {
-	fmt.Println(i,row)
 	if len(pi.Tables)<=i {
 		/* Make a copy of this row. */
 		coro := make(sql.Row,len(row))
@@ -112,7 +109,6 @@ func (pi *PassingIterator) perform(i int,row sql.Row) (e error) {
 	if e!=nil { return }
 	
 	ret := pi.Tables[i].LookupDirect([2]uint64{h1,h2})
-	fmt.Println(i,row,h1,h2,"=",ret)
 	for _,right := range ret {
 		nr := append(row,right...)
 		e = pi.perform(i+1,nr)
