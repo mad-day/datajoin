@@ -25,9 +25,6 @@ type HashReducer struct{
 	Tables []int
 	Hashes [][]sql.Expression
 }
-type StraightMerger struct{
-	Left, Right []sql.Expression
-}
 
 func (r *RealJoin) getBitMaps() []uint64 {
 	var u,shard uint64
@@ -121,17 +118,7 @@ func (r *RealJoin) GetHashForReducer(hr *HashReducer) {
 		}
 	}
 }
-/* DEPRECATED */
-func (r *RealJoin) StraightHash() (sm []StraightMerger){
-	sm = make([]StraightMerger,len(r.Tables))
-	for i,l := 1,len(r.Tables) ; i < l ; i++ {
-		hf := r.GetHashFor(matcher.TableSetFor(r.Tables[:i]),matcher.TableSetFor(r.Tables[i:][:1]))
-		sm[i].Left  = hf[0]
-		sm[i].Right = hf[1]
-		for j,ex := range sm[i].Right { sm[i].Right[j],_ = ex.TransformUp(matcher.Indent(-r.Offsets[i])) }
-	}
-	return
-}
+
 func (r *RealJoin) MergeHashes() (sm hashjoin.MergeHashes){
 	sm = make(hashjoin.MergeHashes,len(r.Tables))
 	for i,l := 1,len(r.Tables) ; i < l ; i++ {
