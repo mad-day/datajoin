@@ -15,4 +15,22 @@
 */
 
 
-package hashjoin
+package join
+
+import "github.com/mad-day/datajoin/query"
+import "gopkg.in/src-d/go-mysql-server.v0/sql"
+
+func MakeExecutable(node sql.Node) (sql.Node,error) {
+	repl := make(map[*query.Cookie]sql.Node)
+	for _,mj := range GetAll(node) {
+		repl[mj.Cookie] = NewRealJoin(mj)
+	}
+	return node.TransformUp(func(node sql.Node) (sql.Node,error){
+		switch v := node.(type) {
+		case *query.MultiJoin:
+			r,ok := repl[v.Cookie]
+			if ok { return r,nil }
+		}
+		return node,nil
+	})
+}

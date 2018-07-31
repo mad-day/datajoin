@@ -33,6 +33,7 @@ type PassingIterator struct{
 	Endpt  apis.ResultEndpoint
 	Hashes MergeHashes
 	Tables []*TrueHashTable
+	Postfilters []sql.Expression
 	Chunk  int
 	fu  hash.Hash
 	buf []byte
