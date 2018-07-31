@@ -57,6 +57,7 @@ type RealJoin struct{
 	
 	Prefilter []sql.Expression /* Per-Table input filters. */
 	Indexer   []matcher.FieldSpecs /* Index-Scan hints. */
+	Indexer2  []*SpecBuilder /* Preprocessed version of .Indexer */
 }
 func (r *RealJoin) String() string {
 	tp := sql.NewTreePrinter()
@@ -113,6 +114,7 @@ func NewRealJoin(mj *query.MultiJoin) (r *RealJoin) {
 	
 	r.Prefilter = make([]sql.Expression,len(r.Tables))
 	r.Indexer   = make([]matcher.FieldSpecs,len(r.Tables))
+	r.Indexer2  = make([]*SpecBuilder,len(r.Tables))
 	r.Offsets   = make([]int,len(r.Tables))
 	pos := 0
 	for i,table := range r.Tables {
@@ -128,8 +130,11 @@ func NewRealJoin(mj *query.MultiJoin) (r *RealJoin) {
 		}
 		r.Prefilter[i] = expression.JoinAnd(filters...)
 		r.Indexer[i] = matcher.GetIndex(r.Tables[:i+1],mj.Filters)
+		r.Indexer2[i] = NewSpecBuilder(r.Tables,r.Indexer[i])
 		r.Offsets[i] = pos-tsl
 	}
+	
+	
 	
 	return
 }
