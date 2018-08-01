@@ -22,6 +22,9 @@ import "github.com/mad-day/datajoin/join/apis"
 import "golang.org/x/crypto/blake2b"
 import farm "github.com/dgryski/go-farm"
 import "hash"
+import "github.com/mad-day/datajoin/join/matcher"
+import "github.com/spf13/cast"
+
 
 type MergeTableHash struct{
 	Left, Right []sql.Expression
@@ -49,6 +52,14 @@ func (pi *PassingIterator) PassTabBlockRow(tabs [][]sql.Row) error {
 			if i==0 { continue }
 			pi.Tables[i] = new(TrueHashTable)
 		}
+	}
+	if len(pi.Postfilters)<len(tabs) {
+		old := pi.Postfilters
+		pi.Postfilters = make([]sql.Expression,len(tabs))
+		copy(pi.Postfilters,old)
+	}
+	for i := range pi.Postfilters {
+		if pi.Postfilters[i]==nil { pi.Postfilters[i] = matcher.Predict(true) }
 	}
 	
 	width := 0
@@ -112,6 +123,8 @@ func (pi *PassingIterator) perform(i int,row sql.Row) (e error) {
 	ret := pi.Tables[i].LookupDirect([2]uint64{h1,h2})
 	for _,right := range ret {
 		nr := append(row,right...)
+		res,_ := pi.Postfilters[i].Eval(pi.Ctx,nr)
+		if !cast.ToBool(res) { continue }
 		e = pi.perform(i+1,nr)
 		if e!=nil { return }
 	}

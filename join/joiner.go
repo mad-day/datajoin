@@ -49,7 +49,7 @@ func (r *RealJoin) RowIter(ctx *sql.Context) (sql.RowIter, error) {
 	nctx.Context,cancel = context.WithCancel(nctx.Context)
 	ri := &rowIter{nctx,make(chan sql.Row,r.getPreferedBufferSize()),cancel}
 	
-	pi := &hashjoin.PassingIterator{Ctx:nctx,Endpt:ri,Hashes:r.MergeHashes(),Chunk:r.getPreferedChunkSize_One()}
+	pi := &hashjoin.PassingIterator{Ctx:nctx,Endpt:ri,Hashes:r.MergeHashes(),Postfilters:r.Postfilter,Chunk:r.getPreferedChunkSize_One()}
 	go func() {
 		defer close(ri.buffer)
 		r.IterateOver(nctx,pi,r.getPreferedChunkSize_Two())
