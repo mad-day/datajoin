@@ -204,6 +204,9 @@ type DataContext struct{
 	DS api.DataSource
 }
 func (dc DataContext) Parse(query string) (sql.Node,error) {
+	return dc.ParseEx(query,nil)
+}
+func (dc DataContext) ParseEx(query string, costomFuncs sql.Functions) (sql.Node,error) {
 	db := mem.NewDatabase("public")
 	
 	mdb := &mdbObj{DB:db,DS:dc.DS}
@@ -212,6 +215,9 @@ func (dc DataContext) Parse(query string) (sql.Node,error) {
 	an.Catalog.AddDatabase(db)
 	an.CurrentDatabase = "public"
 	for k,v := range function.Defaults {
+		an.Catalog.RegisterFunction(k,v)
+	}
+	for k,v := range costomFuncs {
 		an.Catalog.RegisterFunction(k,v)
 	}
 	an.Catalog.RegisterFunction("equal",sql.FunctionN(NewEqual))
